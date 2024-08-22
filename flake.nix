@@ -18,6 +18,7 @@
       {
         devShells.default = mkShell {
           buildInputs = with pkgs; [
+            nodejs
             watchexec
             elmPackages.elm
             elmPackages.elm-live

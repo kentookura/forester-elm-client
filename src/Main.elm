@@ -3,16 +3,19 @@ module Main exposing (main)
 import Browser exposing (Document)
 import Browser.Navigation as Nav
 import Debug exposing (toString)
-import Forester.XmlTree exposing (Article, Content(..), ContentNode(..), Frontmatter, Prim(..), Section_, article)
+import Forester.Base exposing (XmlQname)
+import Forester.Query exposing (Expr(..))
+import Forester.XmlTree exposing (Article, Content(..), ContentNode(..), Frontmatter, Img(..), Prim(..), Section_, TeXCs_(..), article)
 import Html as H exposing (Html, div, pre, text)
 import Html.Attributes as A
 import Http exposing (expectJson)
+import KaTeX as K
 import RemoteData exposing (RemoteData(..), WebData)
 import Url
 
 
 type alias Model =
-    { article : WebData (Article Content) }
+    { article : WebData (Article Content), buffer : String }
 
 
 type Msg
@@ -34,7 +37,7 @@ getarticle =
 
 init : () -> Url.Url -> Nav.Key -> ( Model, Cmd Msg )
 init _ url key =
-    ( { article = Loading }, getarticle )
+    ( { article = Loading, buffer = "" }, getarticle )
 
 
 update : Msg -> Model -> ( Model, Cmd msg )
@@ -100,6 +103,17 @@ renderContent (Content content) =
         (List.map renderContentNode content)
 
 
+renderXmlQname : XmlQname -> String
+renderXmlQname qname =
+    case qname of
+        { prefix, uname } ->
+            if prefix == "" then
+                uname
+
+            else
+                prefix ++ ":" ++ uname
+
+
 renderContentNode node =
     case node of
         Text str ->
@@ -109,33 +123,61 @@ renderContentNode node =
             [ H.text <| "<!CDATA[" ++ str ++ ">" ]
 
         XmlElt elt ->
-            []
+            -- TODO: hmmm
+            [ H.node (renderXmlQname elt.name) [] [] ]
 
         Transclude _ ->
             []
 
-        ResultsOfQuery _ ->
-            []
+        ResultsOfQuery expr ->
+            case expr of
+                Rel _ _ _ _ ->
+                    []
 
-        Section _ ->
-            []
+                Isect _ ->
+                    []
+
+                Union _ ->
+                    []
+
+                Complement _ ->
+                    []
+
+                UnionFam _ _ ->
+                    []
+
+                IsectFam _ _ ->
+                    []
+
+        Section content ->
+            [ renderSection content ]
 
         Prim ( p, c ) ->
             [ renderPrim p <| renderContent c ]
 
-        KaTeX _ _ ->
+        KaTeX mode content ->
+            [ K.view { display = mode, markup = "a=b" } ]
+
+        TeXCs texcs ->
+            case texcs of
+                Word str ->
+                    []
+
+                Symbol str ->
+                    []
+
+        Link { href, content } ->
             []
 
-        TeXCs _ ->
-            []
+        Img img ->
+            case img of
+                Inline { format, base64 } ->
+                    [ H.img [ A.src <| "data:image/" ++ format ++ ";base64," ++ base64 ] [] ]
 
-        Link _ ->
-            []
+                Remote url ->
+                    [ H.img [ A.src url ] [] ]
 
-        Img _ ->
-            []
-
-        Resource _ ->
+        Resource { hash, content, sources } ->
             []
 
 
@@ -177,61 +219,6 @@ tagOfPrim p =
 
         Pre ->
             H.pre
-
-
-
-{--
-
-render_content_node : T.content_node -> P.node list =
-function
-    | Text str ->
-      [P.txt "%s" str]
-    | CDATA str ->
-      [P.txt ~raw:true "<![CDATA[%s]]>" str]
-    | Xml_elt elt ->
-      let prefixes_to_add, (name, attrs, content) =
-        Xmlns.within_scope @@ fun () ->
-        render_xml_qname elt.name,
-        List.map render_xml_attr elt.attrs,
-        render_content elt.content
-      in
-      let attrs =
-        let xmlns_attrs = List.map render_xmlns_prefix prefixes_to_add in
-        attrs @ xmlns_attrs
-      in
-      [P.std_tag name attrs content]
-
-    | Prim (p, content) ->
-      [render_prim_node p @@ render_content content]
-    | Transclude transclusion ->
-      render_transclusion transclusion
-    | Link link ->
-      render_link link
-    | Results_of_query q ->
-      F.run_query q
-      |> Util.get_sorted_articles
-      |> List.map (Fun.compose render_section T.article_to_section)
-    | Section section ->
-      [render_section section]
-    | KaTeX (mode, content) ->
-      let l, r =
-        match mode with
-        | Display -> {|\[|}, {|\]|}
-        | Inline -> {|\(|}, {|\)|}
-      in
-      let body = PT.string_of_content content in
-      [P.txt ~raw:true "%s%s%s" l body r]
-    | TeX_cs cs ->
-      [P.txt ~raw:true "\\%s" (TeX_cs.show cs)]
-    | Img img ->
-      [render_img img]
-    | Resource resource ->
-      render_resource resource
-
-   render_resource resource =
-    render_content resource.content
-    --}
--- div [] [ article |> Debug.toString |> text ]
 
 
 subscriptions : Model -> Sub Msg

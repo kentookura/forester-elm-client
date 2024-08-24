@@ -1,5 +1,14 @@
 {
+  "scripts": {
+    "dev": "vite",
+    "serve": "vite preview",
+    "build": "vite build"
+  },
+  "type": "module",
   "dependencies": {
-    "katex": "^0.16.11"
+    "elm-debug-transformer": "^1.2.1",
+    "katex": "^0.16.11",
+    "vite": "^5.4.2",
+    "vite-plugin-elm": "^3.0.1"
   }
 }

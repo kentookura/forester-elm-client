@@ -3,12 +3,12 @@ module Main exposing (main)
 import Browser exposing (Document)
 import Browser.Navigation as Nav
 import Debug exposing (toString)
-import Forester.Base exposing (XmlQname)
+import Forester.Base exposing (Addr(..), XmlQname, pp_addr)
 import Forester.Query exposing (Expr(..))
 import Forester.XmlTree exposing (Article, Content(..), ContentNode(..), Frontmatter, Img(..), Prim(..), Section_, TeXCs_(..), article)
 import Html as H exposing (Html, div, pre, text)
 import Html.Attributes as A
-import Http exposing (expectJson)
+import Http exposing (Error(..), expectJson)
 import KaTeX as K
 import RemoteData exposing (RemoteData(..), WebData)
 import Url
@@ -24,10 +24,10 @@ type Msg
     | UrlChanged Url.Url
 
 
-getarticle : Cmd Msg
-getarticle =
+getArticle : Addr -> Cmd Msg
+getArticle addr =
     Http.get
-        { url = "http://localhost:8000"
+        { url = "http://localhost:8000/" ++ pp_addr addr
         , expect =
             expectJson
                 (RemoteData.fromResult >> ArticleResponse)
@@ -37,7 +37,7 @@ getarticle =
 
 init : () -> Url.Url -> Nav.Key -> ( Model, Cmd Msg )
 init _ url key =
-    ( { article = Loading, buffer = "" }, getarticle )
+    ( { article = Loading, buffer = "" }, getArticle (UserAddr "hello") )
 
 
 update : Msg -> Model -> ( Model, Cmd msg )
@@ -65,7 +65,21 @@ view model =
                     text "Loading"
 
                 Failure err ->
-                    pre [] [ text ("Error: " ++ toString err) ]
+                    case err of
+                        BadUrl url ->
+                            pre [] [ text <| "Internal error: " ++ url ++ "is not a valid url" ]
+
+                        Timeout ->
+                            div [] [ text "request timed out" ]
+
+                        NetworkError ->
+                            pre [] [ text "Network error when fetching tree. Is the server running?" ]
+
+                        BadStatus status ->
+                            pre [] [ text <| "request returned status " ++ String.fromInt status ]
+
+                        BadBody str ->
+                            pre [] [ text str ]
 
                 Success article ->
                     renderArticle article

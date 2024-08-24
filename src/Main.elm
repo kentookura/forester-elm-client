@@ -27,6 +27,7 @@ type alias Model =
 
 type Msg
     = ArticleResponse (WebData (Article Content))
+    | HypermediaRequest HypermediaControl
     | LinkClicked Browser.UrlRequest
     | UrlChanged Url.Url
 
@@ -42,6 +43,47 @@ getArticle addr =
         }
 
 
+type HypermediaControl
+    = T
+    | Q
+    | L
+
+
+hypermediaControl : ContentNode -> Maybe HypermediaControl
+hypermediaControl n =
+    case n of
+        Transclude { addr, target, modifier } ->
+            Just T
+
+        ResultsOfQuery expr ->
+            Just Q
+
+        Link { href, content } ->
+            Just L
+
+        _ ->
+            Nothing
+
+
+getDependents : Content -> Cmd Msg
+getDependents (Content nodes) =
+    nodes
+        |> List.filterMap hypermediaControl
+        |> List.map
+            (\c ->
+                case c of
+                    T ->
+                        Cmd.none
+
+                    Q ->
+                        Cmd.none
+
+                    L ->
+                        Cmd.none
+            )
+        |> Cmd.batch
+
+
 init : () -> Url.Url -> Nav.Key -> ( Model, Cmd Msg )
 init _ _ _ =
     ( { article = Loading, buffer = "" }, getArticle (UserAddr "hello") )
@@ -50,6 +92,9 @@ init _ _ _ =
 update : Msg -> Model -> ( Model, Cmd msg )
 update msg model =
     case msg of
+        HypermediaRequest _ ->
+            ( model, Cmd.none )
+
         ArticleResponse response ->
             ( { model | article = response }, Cmd.none )
 

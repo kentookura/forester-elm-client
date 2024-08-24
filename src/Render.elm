@@ -25,6 +25,7 @@ import Forester.XmlTree
         )
 import Html as H exposing (Html, div)
 import Html.Attributes as A
+import Html.Events as E
 import Http exposing (Error(..))
 import KaTeX as K
 import RemoteData exposing (RemoteData(..))
@@ -71,6 +72,7 @@ renderXmlQname qname =
                 prefix ++ ":" ++ uname
 
 
+renderContentNode : ContentNode -> List (Html msg)
 renderContentNode node =
     case node of
         Text str ->
@@ -83,8 +85,10 @@ renderContentNode node =
             -- TODO: hmmm
             [ H.node (renderXmlQname elt.name) [] [] ]
 
-        Transclude _ ->
-            []
+        Transclude a ->
+            case a of
+                { addr, target, modifier } ->
+                    []
 
         ResultsOfQuery expr ->
             case expr of
@@ -113,7 +117,10 @@ renderContentNode node =
             [ renderPrim p <| renderContent c ]
 
         KaTeX mode _ ->
-            [ K.view { display = mode, markup = "a=b" } ]
+            [ H.pre [] [ H.text "Todo: import katex webcomponent with js" ]
+
+            --K.view { display = mode, markup = "a=b" }
+            ]
 
         TeXCs texcs ->
             case texcs of

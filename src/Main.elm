@@ -2,31 +2,44 @@ module Main exposing (main)
 
 import Browser exposing (Document)
 import Browser.Navigation as Nav
-import Forester.Base exposing (Addr(..), pp_addr)
-import Forester.Query exposing (Expr(..))
+import Dict exposing (Dict)
+import Forester.Base exposing (Addr(..), MathMode(..), ppAddr)
+import Forester.Config exposing (Config, config)
+import Forester.Query as Query exposing (Expr(..))
 import Forester.XmlTree
     exposing
         ( Article
         , Content(..)
         , ContentNode(..)
         , Img(..)
+        , Link_
         , Prim(..)
         , TeXCs_(..)
+        , Transclusion
         , article
+        , content
         )
-import Html exposing (div, pre, text)
+import Html exposing (div, pre, text, wbr)
 import Http exposing (Error(..), expectJson)
+import KaTeX as K
+import Platform.Cmd exposing (Cmd)
 import RemoteData exposing (RemoteData(..), WebData)
 import Render exposing (renderArticle)
 import Url
 
 
 type alias Model =
-    { article : WebData (Article Content), buffer : String }
+    { fragments : Dict String (Article Content)
+    , root : Maybe Addr
+    , buffer : String
+    , config : WebData Config
+    }
 
 
 type Msg
     = ArticleResponse (WebData (Article Content))
+    | ContentResponse (WebData Content)
+    | ConfigResponse (WebData Config)
     | HypermediaRequest HypermediaControl
     | LinkClicked Browser.UrlRequest
     | UrlChanged Url.Url
@@ -35,7 +48,7 @@ type Msg
 getArticle : Addr -> Cmd Msg
 getArticle addr =
     Http.get
-        { url = "http://localhost:8000/" ++ pp_addr addr
+        { url = "http://localhost:8000/" ++ ppAddr addr
         , expect =
             expectJson
                 (RemoteData.fromResult >> ArticleResponse)
@@ -43,23 +56,45 @@ getArticle addr =
         }
 
 
+getContent : Addr -> Cmd Msg
+getContent addr =
+    Http.get
+        { url = "http://localhost:8000/" ++ ppAddr addr
+        , expect =
+            expectJson
+                (RemoteData.fromResult >> ContentResponse)
+                content
+        }
+
+
+getConfig : Cmd Msg
+getConfig =
+    Http.get
+        { url = "http://localhost:8000/config"
+        , expect =
+            expectJson
+                (RemoteData.fromResult >> ConfigResponse)
+                config
+        }
+
+
 type HypermediaControl
-    = T
-    | Q
-    | L
+    = T (Transclusion Content)
+    | Q (Query.Expr Int)
+    | L (Link_ Content)
 
 
 hypermediaControl : ContentNode -> Maybe HypermediaControl
 hypermediaControl n =
     case n of
-        Transclude { addr, target, modifier } ->
-            Just T
+        Transclude transclusion ->
+            Just (T transclusion)
 
         ResultsOfQuery expr ->
-            Just Q
+            Just (Q expr)
 
-        Link { href, content } ->
-            Just L
+        Link link ->
+            Just (L link)
 
         _ ->
             Nothing
@@ -72,13 +107,13 @@ getDependents (Content nodes) =
         |> List.map
             (\c ->
                 case c of
-                    T ->
+                    T { addr, target, modifier } ->
+                        getArticle addr
+
+                    Q query ->
                         Cmd.none
 
-                    Q ->
-                        Cmd.none
-
-                    L ->
+                    L { href, content } ->
                         Cmd.none
             )
         |> Cmd.batch
@@ -86,17 +121,65 @@ getDependents (Content nodes) =
 
 init : () -> Url.Url -> Nav.Key -> ( Model, Cmd Msg )
 init _ _ _ =
-    ( { article = Loading, buffer = "" }, getArticle (UserAddr "hello") )
+    ( { fragments = Dict.empty
+      , buffer = ""
+      , config = NotAsked
+      , root = Nothing
+      }
+    , getConfig
+    )
 
 
-update : Msg -> Model -> ( Model, Cmd msg )
+update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
-        HypermediaRequest _ ->
+        HypermediaRequest req ->
             ( model, Cmd.none )
 
+        ConfigResponse c ->
+            let
+                ( cmd, root ) =
+                    case c of
+                        Success config ->
+                            ( getArticle (UserAddr config.root), Just (UserAddr config.root) )
+
+                        _ ->
+                            ( Cmd.none, Nothing )
+            in
+            ( { model | config = c, root = root }, cmd )
+
+        ContentResponse response ->
+            case response of
+                Success content ->
+                    ( model, Cmd.none )
+
+                NotAsked ->
+                    ( model, Cmd.none )
+
+                Loading ->
+                    ( model, Cmd.none )
+
+                Failure _ ->
+                    ( model, Cmd.none )
+
         ArticleResponse response ->
-            ( { model | article = response }, Cmd.none )
+            case response of
+                Success article ->
+                    ( { model
+                        | fragments =
+                            Dict.insert (article.frontmatter.addr |> ppAddr) article model.fragments
+                      }
+                    , getDependents article.mainmatter
+                    )
+
+                NotAsked ->
+                    ( model, Cmd.none )
+
+                Loading ->
+                    ( model, Cmd.none )
+
+                Failure _ ->
+                    ( model, Cmd.none )
 
         LinkClicked _ ->
             ( model, Cmd.none )
@@ -109,32 +192,17 @@ view : Model -> Document msg
 view model =
     let
         body =
-            case model.article of
-                NotAsked ->
-                    text "Initialising."
+            case model.root of
+                Just addr ->
+                    case Dict.get (ppAddr addr) model.fragments of
+                        Just article ->
+                            renderArticle article
 
-                Loading ->
-                    text "Loading"
+                        Nothing ->
+                            pre [] []
 
-                Failure err ->
-                    case err of
-                        BadUrl url ->
-                            pre [] [ text <| "Internal error: " ++ url ++ "is not a valid url" ]
-
-                        Timeout ->
-                            div [] [ text "request timed out" ]
-
-                        NetworkError ->
-                            pre [] [ text "Network error when fetching tree. Is the server running?" ]
-
-                        BadStatus status ->
-                            pre [] [ text <| "request returned status " ++ String.fromInt status ]
-
-                        BadBody str ->
-                            pre [] [ text str ]
-
-                Success article ->
-                    renderArticle article
+                Nothing ->
+                    pre [] []
     in
     { title = "forester", body = [ body ] }
 

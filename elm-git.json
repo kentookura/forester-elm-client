@@ -1,7 +1,7 @@
 {
     "git-dependencies": {
         "direct": {
-            "https://github.com/kentookura/forester-elm-bindings": "9ffa06cc24e9e6f948b294ad8d516acf79a0d18f"
+            "https://github.com/kentookura/forester-elm-bindings": "85b5b19ef4f867dd2391d0bb803dbe9c5ea17b9a"
         },
         "indirect": {}
     }

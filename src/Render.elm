@@ -1,5 +1,6 @@
 module Render exposing
-    ( renderArticle
+    ( Scope
+    , renderArticle
     , renderContent
     , renderContentNode
     , renderFrontmatter
@@ -9,6 +10,7 @@ module Render exposing
     , tagOfPrim
     )
 
+import Dict exposing (Dict)
 import Forester.Base exposing (Addr(..), XmlQname)
 import Forester.Query exposing (Expr(..))
 import Forester.XmlTree
@@ -31,34 +33,45 @@ import KaTeX as K
 import RemoteData exposing (RemoteData(..))
 
 
-renderArticle : Article Content -> Html msg
-renderArticle article =
+type alias Scope =
+    Dict String (Article Content)
+
+
+renderArticle : Scope -> Article Content -> Html msg
+renderArticle scope article =
     H.article []
-        [ renderFrontmatter article.frontmatter
-        , div [] (renderContent article.mainmatter)
-        , H.section [ A.class "backmatter" ] (renderContent article.backmatter)
+        [ renderFrontmatter scope article.frontmatter
+        , div [] (renderContent scope article.mainmatter)
+        , H.section [ A.class "backmatter" ]
+            (renderContent
+                scope
+                article.backmatter
+            )
         ]
 
 
-renderSection : Section_ Content -> Html msg
-renderSection section =
+renderSection : Scope -> Section_ Content -> Html msg
+renderSection scope section =
     H.section []
-        [ renderFrontmatter section.frontmatter
-        , div [] <| renderContent section.mainmatter
+        [ renderFrontmatter scope section.frontmatter
+        , div [] <| renderContent scope section.mainmatter
         ]
 
 
-renderFrontmatter : Frontmatter Content -> Html msg
-renderFrontmatter frontmatter =
+renderFrontmatter : Scope -> Frontmatter Content -> Html msg
+renderFrontmatter scope frontmatter =
     H.header []
-        [ H.h1 [] <| renderContent frontmatter.title
+        [ H.h1 [] <| renderContent scope frontmatter.title
         ]
 
 
-renderContent : Content -> List (Html msg)
-renderContent (Content content) =
+renderContent :
+    Scope
+    -> Content
+    -> List (Html msg)
+renderContent scope (Content content) =
     List.concat
-        (List.map renderContentNode content)
+        (List.map (\c -> renderContentNode scope c) content)
 
 
 renderXmlQname : XmlQname -> String
@@ -72,8 +85,11 @@ renderXmlQname qname =
                 prefix ++ ":" ++ uname
 
 
-renderContentNode : ContentNode -> List (Html msg)
-renderContentNode node =
+renderContentNode :
+    Scope
+    -> ContentNode
+    -> List (Html msg)
+renderContentNode scope node =
     case node of
         Text str ->
             [ H.text str ]
@@ -85,10 +101,8 @@ renderContentNode node =
             -- TODO: hmmm
             [ H.node (renderXmlQname elt.name) [] [] ]
 
-        Transclude a ->
-            case a of
-                { addr, target, modifier } ->
-                    []
+        Transclude { addr, target, modifier } ->
+            [ H.text "todo: handle transclusions" ]
 
         ResultsOfQuery expr ->
             case expr of
@@ -111,15 +125,13 @@ renderContentNode node =
                     []
 
         Section content ->
-            [ renderSection content ]
+            [ renderSection scope content ]
 
         Prim ( p, c ) ->
-            [ renderPrim p <| renderContent c ]
+            [ renderPrim p <| renderContent scope c ]
 
-        KaTeX mode _ ->
-            [ H.pre [] [ H.text "Todo: import katex webcomponent with js" ]
-
-            --K.view { display = mode, markup = "a=b" }
+        KaTeX mode markup ->
+            [ K.view { display = mode, markup = "a=b" }
             ]
 
         TeXCs texcs ->

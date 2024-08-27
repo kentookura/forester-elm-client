@@ -284,7 +284,7 @@ view model =
                                     pre [] [ text "no root" ]
 
                         addr ->
-                            -- TODO: Actually parse the path.
+                            -- TODO: Actually parse the path. "/addr" -> "addr"
                             case Dict.get (String.dropLeft 1 addr) scope of
                                 Just article ->
                                     renderArticle scope article
@@ -293,6 +293,12 @@ view model =
                                     pre [] [ text <| "Internal error: could not find address " ++ addr ++ " in scope" ]
     in
     { title = "forester", body = [ body ] }
+
+
+
+-- I would handle cache invalidation via subscriptions. We can do the complex
+-- logic in OCaml, send the info via websockets and ports, and the just update
+-- the frontend environment.
 
 
 subscriptions : Model -> Sub Msg

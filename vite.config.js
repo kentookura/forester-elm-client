@@ -4,4 +4,5 @@ import elmPlugin from "vite-plugin-elm";
 
 export default defineConfig({
   plugins: [elmPlugin()],
+  server: { watch: { ignored: [`${__dirname}/.direnv/**`] } },
 });

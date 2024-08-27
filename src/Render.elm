@@ -25,7 +25,7 @@ import Forester.XmlTree
         , TeXCs_(..)
         , article
         )
-import Html as H exposing (Html, div)
+import Html as H exposing (Html, a, div)
 import Html.Attributes as A
 import Html.Events as E
 import Http exposing (Error(..))
@@ -142,8 +142,8 @@ renderContentNode scope node =
                 Symbol _ ->
                     []
 
-        Link _ ->
-            []
+        Link { href, content } ->
+            [ a [ A.href href ] <| renderContent scope content ]
 
         Img img ->
             case img of

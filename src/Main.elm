@@ -20,10 +20,11 @@ import Forester.XmlTree
         , article
         )
 import Hash
-import Html exposing (pre)
+import Html exposing (pre, text)
 import Http exposing (Error(..), expectJson, jsonBody)
 import Json.Decode as Decode
 import Json.Encode as Encode
+import List.Extra
 import Platform.Cmd exposing (Cmd)
 import RemoteData exposing (RemoteData(..), WebData)
 import Render exposing (Scope, renderArticle)
@@ -33,16 +34,15 @@ import Url
 type alias Model =
     { fragments : Scope
     , queryResults : Dict String (List Addr)
-    , root : Maybe Addr
-    , buffer : String
     , config : WebData Config
+    , key : Nav.Key
+    , url : Url.Url
     }
 
 
 type Msg
     = ArticleResponse (WebData (Article Content))
-    | ContentResponse (WebData Content)
-      -- we need to keep track of which query was run. If we encounter just a
+      -- We need to keep track of which query was run. If we encounter just a
       -- WebData (List Addr), we can't really do anything with it
     | QueryResponse (Query.Expr Query.Dbix) (WebData (List Addr))
     | ConfigResponse (WebData Config)
@@ -50,10 +50,15 @@ type Msg
     | UrlChanged Url.Url
 
 
+apiURL : String
+apiURL =
+    "http://localhost:8000/"
+
+
 getArticle : Addr -> Cmd Msg
 getArticle addr =
     Http.get
-        { url = "http://localhost:8000/" ++ ppAddr addr
+        { url = apiURL ++ "trees/" ++ ppAddr addr
         , expect =
             expectJson
                 (RemoteData.fromResult >> ArticleResponse)
@@ -64,7 +69,7 @@ getArticle addr =
 getConfig : Cmd Msg
 getConfig =
     Http.get
-        { url = "http://localhost:8000/config"
+        { url = apiURL ++ "config"
         , expect =
             expectJson
                 (RemoteData.fromResult >> ConfigResponse)
@@ -79,7 +84,7 @@ runQuery query =
             Encode.int i
     in
     Http.post
-        { url = "http://localhost:8000/query"
+        { url = apiURL ++ "query"
         , body = jsonBody (encodeExpr encodeDbix query)
         , expect =
             Http.expectJson
@@ -94,51 +99,73 @@ runQuery query =
 type HypermediaControl
     = T (Transclusion Content)
     | Q (Query.Expr Int)
-    | L (Link_ Content)
+    | L String
 
 
-hypermediaControl : ContentNode -> Maybe HypermediaControl
+hypermediaControl : ContentNode -> List HypermediaControl
 hypermediaControl n =
     case n of
         Transclude transclusion ->
-            Just (T transclusion)
+            [ T transclusion ]
 
         ResultsOfQuery expr ->
-            Just (Q expr)
+            [ Q expr ]
 
-        Link link ->
-            Just (L link)
+        Link { href } ->
+            [ L href ]
 
-        _ ->
-            Nothing
+        XmlElt { content } ->
+            let
+                (Content c) =
+                    content
+            in
+            List.concat (List.map hypermediaControl c)
 
+        Section { frontmatter, mainmatter } ->
+            let
+                (Content mm) =
+                    mainmatter
 
-getDependents : Content -> Cmd Msg
-getDependents (Content nodes) =
-    nodes
-        |> List.filterMap hypermediaControl
-        |> List.map
-            (\c ->
-                case c of
-                    T { addr, target, modifier } ->
-                        getArticle addr
+                -- TODO: handle metas
+                { title, metas } =
+                    frontmatter
 
-                    Q query ->
-                        runQuery query
+                ts =
+                    case title of
+                        Content c ->
+                            List.concat (List.map hypermediaControl c)
+            in
+            List.append ts <| List.concat (List.map hypermediaControl mm)
 
-                    L { href, content } ->
-                        Cmd.none
-            )
-        |> Cmd.batch
+        Prim ( _, Content content ) ->
+            List.concat <| List.map hypermediaControl content
+
+        KaTeX _ (Content content) ->
+            List.concat <| List.map hypermediaControl content
+
+        Text _ ->
+            []
+
+        CDATA _ ->
+            []
+
+        TeXCs _ ->
+            []
+
+        Img _ ->
+            []
+
+        Resource _ ->
+            []
 
 
 init : () -> Url.Url -> Nav.Key -> ( Model, Cmd Msg )
-init _ _ _ =
+init _ url key =
     ( { fragments = Dict.empty
-      , buffer = ""
       , queryResults = Dict.empty
       , config = NotAsked
-      , root = Nothing
+      , key = key
+      , url = url
       }
     , getConfig
     )
@@ -169,29 +196,15 @@ update msg model =
 
         ConfigResponse c ->
             let
-                ( cmd, root ) =
+                cmd =
                     case c of
                         Success config ->
-                            ( getArticle (UserAddr config.root), Just (UserAddr config.root) )
+                            getArticle (UserAddr config.root)
 
                         _ ->
-                            ( Cmd.none, Nothing )
+                            Cmd.none
             in
-            ( { model | config = c, root = root }, cmd )
-
-        ContentResponse response ->
-            case response of
-                Success content ->
-                    ( model, Cmd.none )
-
-                NotAsked ->
-                    ( model, Cmd.none )
-
-                Loading ->
-                    ( model, Cmd.none )
-
-                Failure _ ->
-                    ( model, Cmd.none )
+            ( { model | config = c }, cmd )
 
         ArticleResponse response ->
             case response of
@@ -200,7 +213,25 @@ update msg model =
                         | fragments =
                             Dict.insert (article.frontmatter.addr |> ppAddr) article model.fragments
                       }
-                    , getDependents article.mainmatter
+                    , let
+                        (Content nodes) =
+                            article.mainmatter
+                      in
+                      nodes
+                        |> List.concatMap hypermediaControl
+                        |> List.map
+                            (\c ->
+                                case c of
+                                    T { addr } ->
+                                        getArticle addr
+
+                                    Q query ->
+                                        runQuery query
+
+                                    L href ->
+                                        getArticle (UserAddr href)
+                            )
+                        |> Cmd.batch
                     )
 
                 NotAsked ->
@@ -212,11 +243,16 @@ update msg model =
                 Failure _ ->
                     ( model, Cmd.none )
 
-        LinkClicked _ ->
-            ( model, Cmd.none )
+        LinkClicked urlRequest ->
+            case urlRequest of
+                Browser.Internal url ->
+                    ( model, Nav.pushUrl model.key (Url.toString url) )
 
-        UrlChanged _ ->
-            ( model, Cmd.none )
+                Browser.External href ->
+                    ( model, Nav.load href )
+
+        UrlChanged url ->
+            ( { model | url = url }, Cmd.none )
 
 
 view : Model -> Document Msg
@@ -227,17 +263,34 @@ view model =
                 scope =
                     model.fragments
             in
-            case model.root of
-                Just addr ->
-                    case Dict.get (ppAddr addr) model.fragments of
-                        Just article ->
-                            renderArticle scope article
+            case model.config of
+                Failure _ ->
+                    pre [] [ text "could not load config. Is the backend running?" ]
 
-                        Nothing ->
-                            pre [] []
+                NotAsked ->
+                    pre [] [ text "waiting" ]
 
-                Nothing ->
-                    pre [] []
+                Loading ->
+                    pre [] [ text "loading config..." ]
+
+                Success config ->
+                    case model.url.path of
+                        "/" ->
+                            case Dict.get config.root scope of
+                                Just article ->
+                                    renderArticle scope article
+
+                                Nothing ->
+                                    pre [] [ text "no root" ]
+
+                        addr ->
+                            -- TODO: Actually parse the path.
+                            case Dict.get (String.dropLeft 1 addr) scope of
+                                Just article ->
+                                    renderArticle scope article
+
+                                Nothing ->
+                                    pre [] [ text <| "Internal error: could not find address " ++ addr ++ " in scope" ]
     in
     { title = "forester", body = [ body ] }
 

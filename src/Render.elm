@@ -28,7 +28,6 @@ import Forester.XmlTree
         )
 import Html as H exposing (Html, a, div)
 import Html.Attributes as A
-import Html.Events as E
 import Http exposing (Error(..))
 import KaTeX as K
 import RemoteData exposing (RemoteData(..))
@@ -193,10 +192,12 @@ renderContentNode scope node =
             []
 
 
+renderPrim : a -> List (Html msg) -> Html msg
 renderPrim _ =
     tagOfPrim P []
 
 
+tagOfPrim : Prim -> List (H.Attribute msg) -> List (Html msg) -> Html msg
 tagOfPrim p =
     case p of
         P ->

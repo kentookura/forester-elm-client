@@ -20,21 +20,139 @@ import Forester.XmlTree
         , ContentNode(..)
         , ContentTarget(..)
         , Frontmatter
+        , FrontmatterOverrides
         , Img(..)
         , Prim(..)
+        , SectionFlags
         , Section_
         , TeXCs_(..)
+        , Transclusion
         , article
+        , defaultSectionFlags
+        , emptyFrontmatterOverrides
         )
 import Html as H exposing (Html, a, div)
 import Html.Attributes as A
 import Http exposing (Error(..))
 import KaTeX as K
+import Maybe exposing (withDefault)
 import RemoteData exposing (RemoteData(..))
 
 
 type alias Scope =
     Dict String (Article Content)
+
+
+
+-- FIXME: Should not have to reimplement in elm!
+
+
+applyOverrides : FrontmatterOverrides content -> Frontmatter content -> Frontmatter content
+applyOverrides overrides frontmatter =
+    { frontmatter
+        | title = withDefault frontmatter.title overrides.title
+        , taxon = withDefault frontmatter.taxon overrides.taxon
+    }
+
+
+
+-- FIXME: Should not have to reimplement in elm!
+
+
+articleToSection :
+    Maybe SectionFlags
+    -> Maybe (FrontmatterOverrides content)
+    -> Article content
+    -> Section_ content
+articleToSection flags overrides { frontmatter, mainmatter } =
+    let
+        flgs =
+            withDefault defaultSectionFlags flags
+
+        ovrs =
+            withDefault emptyFrontmatterOverrides overrides
+    in
+    { frontmatter = applyOverrides ovrs frontmatter
+    , mainmatter = mainmatter
+    , flags = flgs
+    }
+
+
+
+-- FIXME: Should not have to reimplement in elm!
+
+
+getExpandedTitle : Maybe Addr -> Frontmatter content -> content
+getExpandedTitle scope frontmatter =
+    let
+        shortTitle =
+            frontmatter.title
+    in
+    case frontmatter.designated_parent of
+        Just (UserAddr parentAddr) ->
+            if scope == frontmatter.designated_parent then
+                shortTitle
+
+            else
+                shortTitle
+
+        _ ->
+            shortTitle
+
+
+
+-- FIXME: Should not have to reimplement in elm!
+
+
+getContentOfTransclusion : Scope -> Transclusion Content -> Content
+getContentOfTransclusion scope transclusion =
+    let
+        content =
+            case transclusion.target of
+                Full flags overrides ->
+                    case Dict.get (ppAddr transclusion.addr) scope of
+                        Nothing ->
+                            Content []
+
+                        Just article ->
+                            Content
+                                [ Section
+                                    (articleToSection
+                                        (Just flags)
+                                        (Just overrides)
+                                        article
+                                    )
+                                ]
+
+                Mainmatter ->
+                    case Dict.get (ppAddr transclusion.addr) scope of
+                        Nothing ->
+                            Content []
+
+                        Just article ->
+                            article.mainmatter
+
+                Title ->
+                    case Dict.get (ppAddr transclusion.addr) scope of
+                        Nothing ->
+                            Content []
+
+                        Just article ->
+                            getExpandedTitle Nothing article.frontmatter
+
+                Taxon ->
+                    case Dict.get (ppAddr transclusion.addr) scope of
+                        Nothing ->
+                            Content []
+
+                        Just article ->
+                            let
+                                taxon =
+                                    withDefault "§" article.frontmatter.taxon
+                            in
+                            Content [ Text taxon ]
+    in
+    Content []
 
 
 renderArticle : Scope -> Article Content -> Html msg
@@ -83,6 +201,64 @@ renderXmlQname qname =
 
             else
                 prefix ++ ":" ++ uname
+
+
+renderTexCS : TeXCs_ -> String
+renderTexCS cs =
+    case cs of
+        Word w ->
+            w
+
+        Symbol s ->
+            String.fromChar s
+
+
+renderPlaintextContentNode : Scope -> ContentNode -> String
+renderPlaintextContentNode scope n =
+    case n of
+        Text txt ->
+            txt
+
+        CDATA txt ->
+            txt
+
+        XmlElt elt ->
+            renderPlaintextContent scope elt.content
+
+        Transclude trn ->
+            getContentOfTransclusion scope trn |> renderPlaintextContent scope
+
+        ContextualNumber _ ->
+            ""
+
+        Section _ ->
+            ""
+
+        Prim _ ->
+            ""
+
+        KaTeX _ content ->
+            renderPlaintextContent scope content
+
+        TeXCs cs ->
+            "\\" ++ renderTexCS cs
+
+        Link _ ->
+            ""
+
+        Resource _ ->
+            ""
+
+        Img _ ->
+            ""
+
+        ResultsOfQuery _ ->
+            ""
+
+
+renderPlaintextContent : Scope -> Content -> String
+renderPlaintextContent scope (Content ns) =
+    String.concat (List.map (\n -> renderPlaintextContentNode scope n) ns)
 
 
 renderContentNode :
@@ -147,7 +323,11 @@ renderContentNode scope node =
             [ renderPrim p <| renderContent scope c ]
 
         KaTeX mode markup ->
-            [ K.view { display = mode, markup = "a=b" }
+            let
+                m =
+                    renderPlaintextContent scope markup
+            in
+            [ K.view { display = mode, markup = m }
             ]
 
         TeXCs texcs ->

@@ -99,7 +99,7 @@ runQuery query =
 type HypermediaControl
     = T (Transclusion Content)
     | Q (Query.Expr Int)
-    | L String
+    | L String -- I'd like to change this to addr, but the format of Xml_tree would need to change
 
 
 hypermediaControl : ContentNode -> List HypermediaControl
@@ -113,6 +113,9 @@ hypermediaControl n =
 
         Link { href } ->
             [ L href ]
+
+        ContextualNumber addr ->
+            [ L (ppAddr addr) ]
 
         XmlElt { content } ->
             let

@@ -11,13 +11,14 @@ module Render exposing
     )
 
 import Dict exposing (Dict)
-import Forester.Base exposing (Addr(..), XmlQname)
+import Forester.Base exposing (Addr(..), XmlQname, ppAddr)
 import Forester.Query exposing (Expr(..))
 import Forester.XmlTree
     exposing
         ( Article
         , Content(..)
         , ContentNode(..)
+        , ContentTarget(..)
         , Frontmatter
         , Img(..)
         , Prim(..)
@@ -102,7 +103,23 @@ renderContentNode scope node =
             [ H.node (renderXmlQname elt.name) [] [] ]
 
         Transclude { addr, target, modifier } ->
-            [ H.text "todo: handle transclusions" ]
+            case Dict.get (ppAddr addr) scope of
+                Nothing ->
+                    [ H.text <| "fetching tree at address" ++ ppAddr addr ]
+
+                Just article ->
+                    case target of
+                        Full flags overrides ->
+                            [ renderArticle scope article ]
+
+                        Mainmatter ->
+                            [ renderArticle scope article ]
+
+                        Title ->
+                            [ renderArticle scope article ]
+
+                        Taxon ->
+                            []
 
         ResultsOfQuery expr ->
             case expr of
@@ -152,6 +169,25 @@ renderContentNode scope node =
 
                 Remote url ->
                     [ H.img [ A.src url ] [] ]
+
+        ContextualNumber addr ->
+            let
+                customNumber =
+                    Dict.get (ppAddr addr) scope
+                        |> Maybe.andThen
+                            (\article ->
+                                article.frontmatter.number
+                            )
+                        |> (\m ->
+                                case m of
+                                    Nothing ->
+                                        "[" ++ ppAddr addr ++ "]"
+
+                                    Just num ->
+                                        num
+                           )
+            in
+            [ H.text customNumber ]
 
         Resource _ ->
             []

@@ -225,7 +225,7 @@ update msg model =
                         |> List.map
                             (\c ->
                                 case c of
-                                    T { addr } ->
+                                    T { addr, target, modifier } ->
                                         getArticle addr
 
                                     Q query ->
